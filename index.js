@@ -25,18 +25,20 @@ mongoose
 const productSchema = new mongoose.Schema({
   title: String,
   price: Number,
+  mrpPrice:Number,
   description: String,
-  images: [String],
-  creationAt: Date,
-  updatedAt: Date,
-  category: {
-    id: Number,
-    name: String,
-    image: String,
-    creationAt: Date,
-    updatedAt: Date,
-  },
-});
+  images: [String],           // Array to hold multiple image URLs
+  imageNo: Number,             // Number for referencing a specific image if needed
+  flavours: [String],           // Corrected to [String] for Mongoose
+  category: String,
+  variants: [
+    {
+      _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+      name: String,           // Name of the variant, e.g., "1 kg", "30 servings"
+      price: Number,          // Price specific to this variant
+    },
+  ],
+}, { timestamps: true });
 
 const Product = mongoose.model("Product", productSchema);
 
@@ -56,6 +58,7 @@ const cartSchema = new mongoose.Schema({
   items: [
     {
       productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+      variantId: { type: mongoose.Schema.Types.ObjectId, required: true }, // Removed 'ref'
       quantity: { type: Number, required: true, default: 1 },
     },
   ],
@@ -69,6 +72,7 @@ const orderSchema = new mongoose.Schema({
   items: [
     {
       productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+      variantId: { type: mongoose.Schema.Types.ObjectId, required: true }, // Removed 'ref'
       quantity: { type: Number, required: true },
     },
   ],
@@ -103,11 +107,14 @@ app.post("/addProduct", async (req, res) => {
     const productData = {
       title: req.body.title,
       price: req.body.price,
+      mrpPrice: req.body.mrpPrice,
       description: req.body.description,
       images: req.body.images,
+      flavours: req.body.flavours,
       creationAt: req.body.creationAt || new Date(),
       updatedAt: req.body.updatedAt || new Date(),
       category: req.body.category,
+      variants: req.body.variants,
     };
 
     const newProduct = new Product(productData);
@@ -214,11 +221,19 @@ app.post("/login", async (req, res) => {
 // Route to add an item to the cart
 app.post("/cart/add", authenticateToken, async (req, res) => {
   try {
-    const { productId, quantity } = req.body;
+    const { productId, variantId, quantity } = req.body;
     const userId = req.user.userId;
     console.log("User ID:", userId);
     console.log("Product ID:", productId);
+    console.log("Variant ID:", variantId);
     console.log("Quantity:", quantity);
+
+    // Validate variantId exists in product
+    const product = await Product.findById(productId);
+    const variant = product.variants.id(variantId);
+    if (!variant) {
+      return res.status(400).json({ message: "Invalid variantId" });
+    }
 
     let cart = await Cart.findOne({ userId });
 
@@ -226,17 +241,17 @@ app.post("/cart/add", authenticateToken, async (req, res) => {
       cart = new Cart({ userId, items: [] });
     }
 
-    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId);
+    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId && item.variantId.toString() === variantId);
 
     if (itemIndex > -1) {
       cart.items[itemIndex].quantity += quantity;
     } else {
-      cart.items.push({ productId, quantity });
+      cart.items.push({ productId, variantId, quantity });
     }
     await cart.save();
     res.status(200).json({ message: "Item added to cart", cart });
   } catch (error) {
-    console.error("Error adding item to cart:",error);
+    console.error("Error adding item to cart:", error);
     res.status(500).json({ message: "Error adding item to cart", error });
   }
 });
@@ -244,7 +259,7 @@ app.post("/cart/add", authenticateToken, async (req, res) => {
 // Route to remove an item from the cart
 app.post("/cart/remove", authenticateToken, async (req, res) => {
   try {
-    const { productId } = req.body;
+    const { productId, variantId } = req.body;
     const userId = req.user.userId;
 
     const cart = await Cart.findOne({ userId });
@@ -253,7 +268,7 @@ app.post("/cart/remove", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Cart not found" });
     }
 
-    cart.items = cart.items.filter((item) => item.productId.toString() !== productId);
+    cart.items = cart.items.filter((item) => item.productId.toString() !== productId || item.variantId.toString() !== variantId);
 
     await cart.save();
     res.status(200).json({ message: "Item removed from cart", cart });
@@ -265,7 +280,7 @@ app.post("/cart/remove", authenticateToken, async (req, res) => {
 // Route to reduce the number of products in the cart
 app.post("/cart/reduce", authenticateToken, async (req, res) => {
   try {
-    const { productId, quantity } = req.body;
+    const { productId, variantId, quantity } = req.body;
     const userId = req.user.userId;
 
     let cart = await Cart.findOne({ userId });
@@ -274,7 +289,7 @@ app.post("/cart/reduce", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Cart not found" });
     }
     console.log("Cart:", cart);
-    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId);
+    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId && item.variantId.toString() === variantId);
 
     if (itemIndex > -1) {
       cart.items[itemIndex].quantity -= quantity;
@@ -295,7 +310,7 @@ app.post("/cart/reduce", authenticateToken, async (req, res) => {
 // Route to set the quantity of an item in the cart
 app.post("/cart/setQuantity", authenticateToken, async (req, res) => {
   try {
-    const { productId, quantity } = req.body;
+    const { productId, variantId, quantity } = req.body;
     const userId = req.user.userId;
 
     let cart = await Cart.findOne({ userId });
@@ -304,7 +319,7 @@ app.post("/cart/setQuantity", authenticateToken, async (req, res) => {
       cart = new Cart({ userId, items: [] });
     }
 
-    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId);
+    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId && item.variantId.toString() === variantId);
 
     if (itemIndex > -1) {
       cart.items[itemIndex].quantity = quantity;
@@ -313,7 +328,7 @@ app.post("/cart/setQuantity", authenticateToken, async (req, res) => {
       }
     } else {
       if (quantity > 0) {
-        cart.items.push({ productId, quantity });
+        cart.items.push({ productId, variantId, quantity });
       }
     }
 
@@ -334,6 +349,19 @@ app.get("/cart", authenticateToken, async (req, res) => {
     if (!cart) {
       cart = new Cart({ userId, items: [] });
       await cart.save();
+    } else {
+      cart.items = await Promise.all(cart.items.map(async (item) => {
+        const product = await Product.findById(item.productId);
+        const variant = product.variants.id(item.variantId);
+        return {
+          productId: product._id,
+          title: product.title,
+          variantId: item.variantId,
+          variantName: variant ? variant.name : null,
+          price: variant ? variant.price : product.price,
+          quantity: item.quantity,
+        };
+      }));
     }
 
     res.status(200).json(cart);
@@ -397,8 +425,8 @@ app.post("/cart/checkout", authenticateToken, async (req, res) => {
 // Route to get all products
 app.get("/getProducts", async (req, res) => {
   try {
-    console.log("Fetching products");
     const products = await Product.find(); // Fetch all products
+    console.log("Fetching products");
     res.status(200).json(products);
   } catch (error) {
     res.status(500).json({ message: "Error fetching products", error });
