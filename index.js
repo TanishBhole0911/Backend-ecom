@@ -90,6 +90,15 @@ const orderSchema = new mongoose.Schema({
 
 const Order = mongoose.model("Order", orderSchema);
 
+// Define a schema and model for emails
+const emailSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  name: String,
+  age: Number,
+});
+
+const Email = mongoose.model("Email", emailSchema);
+
 // Middleware to check for login bearer token
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -509,6 +518,20 @@ app.get("/order/:orderId", async (req, res) => {
     res.status(200).json(order);
   } catch (error) {
     res.status(500).json({ message: "Error fetching order details", error });
+  }
+});
+
+// Route to save email data
+app.post("/saveEmail", async (req, res) => {
+  try {
+    const { email, name, age } = req.body;
+
+    const newEmail = new Email({ email, name, age });
+    await newEmail.save();
+
+    res.status(201).json({ message: "Email data saved successfully", email: newEmail });
+  } catch (error) {
+    res.status(500).json({ message: "Error saving email data", error });
   }
 });
 
