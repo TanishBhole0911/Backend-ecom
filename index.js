@@ -9,7 +9,11 @@ const cors = require("cors");
 const app = express();
 app.use(bodyParser.json());
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: '*',
+}));
 
 // Get secret values from environment variables
 const PORT = process.env.PORT || 5000;
@@ -60,6 +64,10 @@ const cartSchema = new mongoose.Schema({
       productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
       variantId: { type: mongoose.Schema.Types.ObjectId, required: true }, // Removed 'ref'
       quantity: { type: Number, required: true, default: 1 },
+      title: {type: String},
+      price:{type:Number},
+      image:{type: String}
+
     },
   ],
 });
@@ -223,11 +231,6 @@ app.post("/cart/add", authenticateToken, async (req, res) => {
   try {
     const { productId, variantId, quantity } = req.body;
     const userId = req.user.userId;
-    console.log("User ID:", userId);
-    console.log("Product ID:", productId);
-    console.log("Variant ID:", variantId);
-    console.log("Quantity:", quantity);
-
     // Validate variantId exists in product
     const product = await Product.findById(productId);
     const variant = product.variants.id(variantId);
@@ -314,27 +317,25 @@ app.post("/cart/setQuantity", authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     let cart = await Cart.findOne({ userId });
-
     if (!cart) {
       cart = new Cart({ userId, items: [] });
     }
 
-    const itemIndex = cart.items.findIndex((item) => item.productId.toString() === productId && item.variantId.toString() === variantId);
+    const itemIndex = cart.items.findIndex(
+      (item) =>
+        item.productId.toString() === productId &&
+        item.variantId.toString() === variantId
+    );
 
     if (itemIndex > -1) {
       cart.items[itemIndex].quantity = quantity;
       if (cart.items[itemIndex].quantity <= 0) {
         cart.items.splice(itemIndex, 1);
       }
-    } else {
-      if (quantity > 0) {
-        cart.items.push({ productId, variantId, quantity });
-      }
     }
-
-    await cart.save();
     res.status(200).json({ message: "Item quantity set", cart });
   } catch (error) {
+    console.error("Error setting item quantity in cart:", error);
     res.status(500).json({ message: "Error setting item quantity in cart", error });
   }
 });
@@ -345,7 +346,6 @@ app.get("/cart", authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     let cart = await Cart.findOne({ userId }).populate("items.productId");
-
     if (!cart) {
       cart = new Cart({ userId, items: [] });
       await cart.save();
@@ -353,17 +353,18 @@ app.get("/cart", authenticateToken, async (req, res) => {
       cart.items = await Promise.all(cart.items.map(async (item) => {
         const product = await Product.findById(item.productId);
         const variant = product.variants.id(item.variantId);
+        console.log("Product:", product.images[0]);
         return {
           productId: product._id,
           title: product.title,
           variantId: item.variantId,
           variantName: variant ? variant.name : null,
-          price: variant ? variant.price : product.price,
+          price: variant.price,
           quantity: item.quantity,
+          image: product.images[0],
         };
       }));
     }
-
     res.status(200).json(cart);
   } catch (error) {
     res.status(500).json({ message: "Error fetching cart", error });
